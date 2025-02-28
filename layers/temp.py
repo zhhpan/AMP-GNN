@@ -1,4 +1,5 @@
 from typing import Callable
+
 from torch import nn, Tensor
 from torch.cuda import device
 from torch.nn import Module, ModuleList

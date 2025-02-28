@@ -1,9 +1,10 @@
-from typing import Callable, Optional, List
+import copy
+from typing import Callable, Optional
+
 import torch
+import torch_geometric.transforms as T
 from torch import nn
 from torch_geometric.data import Data
-import copy
-import torch_geometric.transforms as T
 from torch_geometric.datasets import HeterophilousGraphDataset
 
 

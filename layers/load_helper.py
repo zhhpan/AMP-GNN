@@ -1,6 +1,6 @@
-
-from torch_geometric.nn.conv.gcn_conv import GCNConv
+from layers.gcn import WeightedGCNConv
 from layers.gin import WeightedGINConv
+from layers.gnn import WeightedGNNConv
 from layers.linear import GraphLinear
 
 def get_component_list(in_dim, out_dim, hidden_dim, num_layers, model_type, mlp_func,device,bias = True):
@@ -22,7 +22,13 @@ def get_component_list(in_dim, out_dim, hidden_dim, num_layers, model_type, mlp_
             component_list.append(WeightedGINConv(in_channels = dim_list[i], out_channels = dim_list[i + 1], mlp_func = mlp_func, bias=bias).to(device))
     elif model_type == 'GCN':
         for i in range(len(dim_list) - 1):
-            component_list.append(GCNConv(in_channels = dim_list[i], out_channels = dim_list[i + 1], bias=bias).to(device))
+            component_list.append(WeightedGCNConv(in_channels = dim_list[i], out_channels = dim_list[i + 1], bias=bias).to(device))
+    elif model_type == 'MEAN_GNN':
+        for i in range(len(dim_list) - 1):
+            component_list.append(WeightedGNNConv(in_channels = dim_list[i], out_channels = dim_list[i + 1], bias=bias, aggr='mean').to(device))
+    elif model_type == 'SUM_GNN':
+        for i in range(len(dim_list) - 1):
+            component_list.append(WeightedGNNConv(in_channels = dim_list[i], out_channels = dim_list[i + 1], bias=bias, aggr='sum').to(device))
     elif model_type == 'LIN':
         for i in range(len(dim_list) - 1):
             component_list.append(GraphLinear(in_features=dim_list[i], out_features=dim_list[i + 1], bias=bias).to(device))

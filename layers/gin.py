@@ -1,7 +1,8 @@
 from typing import Callable
+
 import torch
-from torch import nn, Tensor
-from torch.nn import Linear, Dropout, GELU, Parameter, ReLU, Module, ModuleList
+from torch import Tensor
+from torch.nn import Parameter
 from torch_geometric.nn import MessagePassing
 from torch_geometric.typing import Adj, OptTensor
 
@@ -13,7 +14,6 @@ class WeightedGINConv(MessagePassing):
             out_channels: int,
             mlp_func: Callable,
             eps: float = 0.,
-            train_eps: bool = True,
             aggr: str = "add",
             bias: bool = True,
             **kwargs
@@ -27,16 +27,7 @@ class WeightedGINConv(MessagePassing):
 
         # 可学习的epsilon参数（中心节点权重）
         self.initial_eps = eps
-        if train_eps:
-            self.eps = Parameter(torch.Tensor([eps]))
-        else:
-            self.register_buffer('eps', torch.Tensor([eps]))
-
-        self.reset_parameters()
-        self.lin = Linear(in_channels, out_channels, bias=bias)
-
-    def reset_parameters(self):
-        self.eps.data.fill_(self.initial_eps)
+        self.eps = Parameter(torch.Tensor([eps]))
 
     def forward(
             self,
@@ -57,3 +48,10 @@ class WeightedGINConv(MessagePassing):
 
         # 通过MLP变换
         return self.mlp(out)
+
+    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
+        # 加权消息：x_j * edge_weight
+        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+
+    def update(self, aggr_out: Tensor) -> Tensor:
+        return aggr_out

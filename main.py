@@ -1,15 +1,15 @@
+import logging
 import os
+import os.path as osp
 from argparse import Namespace
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple
+
 import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import CrossEntropyLoss
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-import logging
-import os.path as osp
-
 from tqdm import tqdm
 
 from dataset import DataSet as DS
@@ -287,7 +287,7 @@ class Experiment:
 if __name__ == "__main__":
     # 初始化参数
     args = Namespace(
-        dataset_name='questions',
+        dataset_name='roman-empire',
         seed=0,
         batch_size=32,
         env_dim=64,
@@ -300,8 +300,8 @@ if __name__ == "__main__":
         temp = 0.01,
         env_num_layers = 3,
         act_num_layers = 1 ,
-        env_model_type = 'GIN',
-        act_model_type = 'GCN',
+        env_model_type = 'MEAN_GNN',
+        act_model_type = 'MEAN_GNN',
         gumbel_model_type = 'LIN'
     )
 

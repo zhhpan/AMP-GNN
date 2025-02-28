@@ -1,15 +1,12 @@
 import torch
-from torch import nn
-from torch.nn import  Dropout, ReLU
 import torch.nn.functional as F
+from torch import nn
+from torch.nn import Dropout, ReLU
+
 from layers.temp import TempSoftPlus
 from network.action import ActionNetwork
 from network.environment import EnvironmentNetwork
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
-
-
-
-
 
 
 class CoGNN(nn.Module):

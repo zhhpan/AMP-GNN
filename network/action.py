@@ -1,7 +1,8 @@
 from typing import Callable
+
 import torch
 from torch import nn
-from torch.nn import   ReLU
+from torch.nn import ReLU
 
 from layers.load_helper import get_component_list
 

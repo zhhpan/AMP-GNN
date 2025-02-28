@@ -8,7 +8,7 @@ class GumbelParameters:
     learn_temp: bool
     tau0: float
     temp: float
-    gin_mlp_func: Callable[[], Any]  # 生成GIN网络的MLP函数
+    gin_mlp_func: Callable[[], Any]
     model_type: str
 
 
@@ -17,10 +17,10 @@ class EnvironmentParameters:
     """环境网络核心参数配置"""
     num_layers: int
     env_dim: int
-    in_dim: int  # 输入维度来自数据集
-    out_dim: int  # 输出维度来自数据集
+    in_dim: int
+    out_dim: int
     dropout: float
-    activation: Callable[[], Any]  # 激活函数类型
+    activation: Callable[[], Any]
     model_type: str
 
 
@@ -29,7 +29,7 @@ class ActionParameters:
     """行动网络参数配置"""
     num_layers: int
     hidden_dim: int
-    env_dim: int  # 与环境网络共享维度
+    env_dim: int
     dropout: float
     model_type: str
 
