@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from dataset import DataSet as DS
 from model import CoGNN
+from param import GumbelParameters, EnvironmentParameters, ActionParameters
 
 
 class Experiment:
@@ -24,13 +25,13 @@ class Experiment:
         Args:
             args (Namespace): 包含以下关键参数：
                 - dataset_name: 数据集名称
-                - seed: 随机种子（默认42）
+                - seed: 随机种子
                 - batch_size: 批大小
-                - env_dim: 环境网络维度（默认64）
-                - act_dim: 行动网络维度（默认32）
-                - dropout: 丢弃率（默认0.5）
-                - lr: 学习率（默认0.001）
-                - epochs: 训练轮次（默认3000）
+                - env_dim: 环境网络维度
+                - act_dim: 动作网络维度
+                - dropout: 丢弃率
+                - lr: 学习率
+                - epochs: 训练轮次
 
         """
         # 初始化日志配置
@@ -71,7 +72,7 @@ class Experiment:
         np.random.seed(self.seed)
         self.logger.info(f"全局随机种子设置为 {self.seed}")
 
-    def prepare_model_arguments(self) -> Dict[str, Dict]:
+    def prepare_model_arguments(self) :
         """
 
         Returns:
@@ -80,48 +81,48 @@ class Experiment:
                 'env': 环境网络参数
                 'action': 行动网络参数
         """
+
         # Gumbel参数
-        gumbel_params = {
-            'learn_temp': self.learn_temp,
-            'tau0': self.tau0,
-            'temp': self.temp,
-            'gin_mlp_func': self.dataset.gin_mlp_func(),
-            'model_type': self.env_model_type
-        }
+        gumbel_params = GumbelParameters(
+            learn_temp = self.learn_temp,
+            tau0 = self.tau0,
+            temp = self.temp,
+            gin_mlp_func = self.dataset.gin_mlp_func(),
+            model_type = self.gumbel_model_type
+        )
 
         # 环境网络参数（核心组件）
-        env_params = {
-            'num_layers': self.env_num_layers,
-            'env_dim': self.env_dim,
-            'in_dim': self.dataset.num_features,
-            'out_dim': self.dataset.get_out_dim(),
-            'dropout': self.dropout,
-            'activation': self.dataset.env_activation_type(),
-            'model_type' : self.env_model_type
-        }
+        env_params = EnvironmentParameters(
+            num_layers = self.env_num_layers,
+            env_dim = self.env_dim,
+            in_dim = self.dataset.num_features,
+            out_dim = self.dataset.get_out_dim(),
+            dropout = self.dropout,
+            activation = self.dataset.env_activation_type(),
+            model_type = self.env_model_type
+        )
 
         # 行动网络参数
-        action_params = {
-            'num_layers': self.act_num_layers,
-            'hidden_dim': self.act_dim,
-            'env_dim': self.env_dim,
-            'dropout': self.dropout,
-            'model_type': self.act_model_type
-        }
+        action_params = ActionParameters(
+            num_layers = self.act_num_layers,
+            hidden_dim = self.act_dim,
+            env_dim = self.env_dim,
+            dropout = self.dropout,
+            model_type = self.act_model_type
+        )
 
         return gumbel_params, env_params, action_params
 
-    def load_dataset(self) -> Data:
+    def load_dataset(self) :
         """
-
-        Returns:
-            Data: 包含以下属性的数据对象：
-                - x: 节点特征
-                - y: 节点标签
-                - edge_index: 全连接边索引
-                - train_mask: 训练节点掩码
-                - val_mask: 验证节点掩码
-                - test_mask: 测试节点掩码
+            Returns:
+                Data: 包含以下属性的数据对象：
+                    - x: 节点特征
+                    - y: 节点标签
+                    - edge_index: 全连接边索引
+                    - train_mask: 训练节点掩码
+                    - val_mask: 验证节点掩码
+                    - test_mask: 测试节点掩码
         """
         # 初始化dataset的参数和存储位置
         ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -132,7 +133,7 @@ class Experiment:
         # 类型转换
         self.dataset.data.y = self.dataset.data.y.to(torch.long)
 
-        return self.dataset.data
+        return
 
     def create_data_loaders(self) -> Dict[str, DataLoader]:
         """
@@ -227,6 +228,7 @@ class Experiment:
                 model = CoGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
 
+
                 best_acc = 0
                 for epoch in range(self.epochs):
                     # 训练步骤
@@ -236,36 +238,37 @@ class Experiment:
                     loss.backward()
                     optimizer.step()
 
-                    # 验证步骤（每10个epoch验证一次）
-                    if epoch % 10 == 0 or epoch == self.epochs - 1:
-                        model.eval()
-                        with torch.no_grad():
-                            _, val_acc = self.evaluate(model, loaders['val'], 'val')
+                    # 验证步骤
+                    model.eval()
+                    with torch.no_grad():
+                        val_loss, val_acc = self.evaluate(model, loaders['val'], 'val')
 
-                        # 更新最佳模型
-                        if val_acc > best_acc:
-                            best_acc = val_acc
-                            torch.save(model.state_dict(), f'fold/{self.dataset.name}_fold{fold}.pth')
+                    # 更新最佳模型
+                    if val_acc > best_acc:
+                        best_acc = val_acc
+                        torch.save(model.state_dict(), f'fold/{self.dataset.name}_fold{fold}.pth')
 
                     # 动态更新进度条描述
                     desc = (
                         f"\033[32m🌐 折叠Fold {fold + 1}/{len(self.folds)}\033[0m | "
                         f"\033[34m轮次Epoch {epoch + 1}/{self.epochs}\033[0m | "
-                        f"损失: \033[31m{loss.item():.4f}\033[0m | "
-                        f"最佳验证: \033[33m{best_acc:.2%}\033[0m"
+                        f"训练损失Train Loss: \033[31m{loss.item():.4f}\033[0m | "
+                        f"验证损失Val Loss: \033[31m{val_loss:.4f}\033[0m | "
+                        f"最佳验证Val Acc: \033[33m{best_acc:.2%}\033[0m"
                     )
                     pbar.set_description(desc)
                     pbar.update(1)
 
                 # 折叠训练完成，执行测试
                 model.load_state_dict(torch.load(f'fold/{self.dataset.name}_fold{fold}.pth'))
-                _, test_acc = self.evaluate(model, loaders['test'], 'test')
+                test_loss, test_acc = self.evaluate(model, loaders['test'], 'test')
                 fold_results.append(test_acc)
 
                 # 更新最终结果展示
                 pbar.write(
                     f"\n✅ Fold {fold + 1} Completed | "
                     f"Test Accuracy: {test_acc:.2%} | "
+                    f"Test Loss: {test_loss:.4f} | "
                     f"Current Mean: {np.mean(fold_results):.2%}"
                 )
 
@@ -284,7 +287,7 @@ class Experiment:
 if __name__ == "__main__":
     # 初始化参数
     args = Namespace(
-        dataset_name='roman-empire',
+        dataset_name='questions',
         seed=0,
         batch_size=32,
         env_dim=64,
@@ -299,6 +302,7 @@ if __name__ == "__main__":
         act_num_layers = 1 ,
         env_model_type = 'GIN',
         act_model_type = 'GCN',
+        gumbel_model_type = 'LIN'
     )
 
     # 运行实验
