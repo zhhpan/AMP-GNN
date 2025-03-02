@@ -22,6 +22,3 @@ class WeightedGNNConv(MessagePassing):
     def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
         # 加权消息：x_j * edge_weight
         return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
-
-    def update(self, aggr_out: Tensor) -> Tensor:
-        return aggr_out

@@ -10,7 +10,7 @@ from torch_geometric.datasets import HeterophilousGraphDataset
 
 class DataSet:
 
-    def __init__(self, name: str, root: str, transform: Optional[Callable] = None):
+    def __init__(self, name: str, root: str):
         """
         初始化数据集实例，自动加载数据。
 
@@ -24,20 +24,17 @@ class DataSet:
         self.transform = T.ToUndirected()
 
         # 加载数据
-        self.data = self.load_data(transform=transform)
+        self.data = self.load_data()
 
-    def load_data(self, transform: Optional[Callable] = None) -> Data:
+    def load_data(self) -> Data:
         """
-        加载roman_empire数据集，并返回torch_geometric.data.Data对象。
-
-        Args:
-            transform (callable, optional): 用于数据转换的函数。
+        加载数据集，并返回torch_geometric.data.Data对象。
 
         Returns:
             Data: 加载并处理后的torch_geometric.data.Data对象。
         """
-        # 创建HeterophilousGraphDataset对象，只处理roman_empire数据集
-        dataset = HeterophilousGraphDataset(root=self.root, name=self.name, transform=T.ToUndirected())
+        # 创建HeterophilousGraphDataset对象
+        dataset = HeterophilousGraphDataset(root=self.root, name=self.name)
         return dataset[0]  # 返回第一个Data对象
 
 
@@ -75,7 +72,7 @@ class DataSet:
 
     def get_out_dim(self) -> int:
         """
-        对于roman_empire数据集，确定模型输出层的维度。
+        确定模型输出层的维度。
 
         Returns:
             int: 输出层维度。
@@ -85,7 +82,7 @@ class DataSet:
     # 7. GIN网络的MLP构建函数
     def gin_mlp_func(self) -> Callable:
         """
-        针对roman_empire数据集，构建GIN网络的等宽MLP结构（无中间层扩展和BatchNorm）。
+        构建GIN网络的等宽MLP结构（无中间层扩展和BatchNorm）。
 
         Returns:
             Callable: MLP构建函数，输入参数为(in_channels, out_channels, bias)。
@@ -100,10 +97,9 @@ class DataSet:
 
     @property
     def num_features(self) -> int:
-        """获取特征维度（适配roman-empire的300维）"""
+        """获取特征维度"""
         return self.data.x.shape[1]
-        # temp = self.data.x[0,:]
-        # return temp.shape
+
 
     def env_activation_type(self) -> type:
         """GIN的激活函数类型"""
