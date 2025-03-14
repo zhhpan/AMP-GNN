@@ -10,10 +10,11 @@ from torch import Tensor
 from torch.nn import CrossEntropyLoss
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
+from torchmetrics import Accuracy
 from tqdm import tqdm
 
 from dataset import DataSet as DS
-from model import CoGNN
+from model import AMPGNN
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
 
 
@@ -64,6 +65,16 @@ class Experiment:
         # 获取所有折叠索引
         self.folds = self.dataset.get_folds()
 
+        # 获取分类任务类别数
+        self.num_classes = self.dataset.get_out_dim()
+        self.logger.info(f"分类类别数: {self.num_classes}")
+
+        # 初始化Accuracy指标
+        self.accuracy = Accuracy(
+            task="multiclass",
+            num_classes=self.num_classes
+        ).to(self.device)
+
     def set_seed(self) -> None:
         """设置全局随机种子"""
         torch.manual_seed(self.seed)
@@ -76,10 +87,9 @@ class Experiment:
         """
 
         Returns:
-            Dict: 包含三个参数字典：
-                'gumbel': Gumbel参数
-                'env': 环境网络参数
-                'action': 行动网络参数
+            'gumbel': Gumbel参数
+            'env': 环境网络参数
+            'action': 行动网络参数
         """
 
         # Gumbel参数
@@ -198,10 +208,13 @@ class Experiment:
 
                 pred = model(data.x.to(self.device),
                              data.edge_index.to(self.device)).argmax(dim=1)
-                correct += pred.eq(data.y.to(self.device)).sum().item()
+                # correct += pred.eq(data.y.to(self.device)).sum().item()
+                node_mask = getattr(data, f"{mask}_mask")
+                self.accuracy(pred, data.y.to(self.device))
 
         avg_loss = total_loss / len(loader)
-        accuracy = correct / len(loader.dataset[0].y)
+        #accuracy = correct / len(loader.dataset[0].y)
+        accuracy = self.accuracy.compute().item()
         return avg_loss, accuracy
 
     def run(self) -> Dict[str, Any]:
@@ -225,7 +238,7 @@ class Experiment:
 
                 # 初始化模型
                 gumbel_params, env_params, action_params = self.prepare_model_arguments()
-                model = CoGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
+                model = AMPGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
 
 
@@ -242,7 +255,7 @@ class Experiment:
                     model.eval()
                     with torch.no_grad():
                         val_loss, val_acc = self.evaluate(model, loaders['val'], 'val')
-
+                    self.accuracy.reset()
                     # 更新最佳模型
                     if val_acc > best_acc:
                         best_acc = val_acc
@@ -262,6 +275,7 @@ class Experiment:
                 # 折叠训练完成，执行测试
                 model.load_state_dict(torch.load(f'fold/{self.dataset.name}_fold{fold}.pth'))
                 test_loss, test_acc = self.evaluate(model, loaders['test'], 'test')
+                self.accuracy.reset()
                 fold_results.append(test_acc)
 
                 # 更新最终结果展示

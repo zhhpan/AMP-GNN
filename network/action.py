@@ -13,7 +13,7 @@ class ActionNetwork(nn.Module):
     def __init__(self, in_dim: int, model_type: str, hidden_dim: int, num_layers: int, dropout: float, mlp_func: Callable, device):
         super().__init__()
         self.device = device
-        self.net = get_component_list(in_dim=in_dim, out_dim=4, hidden_dim=hidden_dim, num_layers=num_layers,model_type=model_type, mlp_func=mlp_func, device=self.device)
+        self.net = get_component_list(in_dim=in_dim, out_dim=2, hidden_dim=hidden_dim, num_layers=num_layers,model_type=model_type, mlp_func=mlp_func, device=self.device)
         self.dropout = nn.Dropout(dropout)
         self.act_func = ReLU()
         self.num_layers = num_layers

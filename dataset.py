@@ -88,11 +88,9 @@ class DataSet:
             Callable: MLP构建函数，输入参数为(in_channels, out_channels, bias)。
         """
         def mlp_func(in_channels: int, out_channels: int, bias: bool):
-            return torch.nn.Sequential(
-                torch.nn.Linear(in_channels, out_channels, bias=bias),  # 输入层
-                torch.nn.ReLU(),                                         # 激活函数
-                torch.nn.Linear(out_channels, out_channels, bias=bias)  # 输出层（等宽）
-            )
+            return torch.nn.Sequential(torch.nn.Linear(in_channels, 2 * in_channels, bias=bias),
+                                           torch.nn.BatchNorm1d(2 * in_channels),
+                                           torch.nn.ReLU(), torch.nn.Linear(2 * in_channels, out_channels, bias=bias))
         return mlp_func
 
     @property

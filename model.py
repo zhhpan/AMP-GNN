@@ -9,7 +9,7 @@ from network.environment import EnvironmentNetwork
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
 
 
-class CoGNN(nn.Module):
+class AMPGNN(nn.Module):
 
     def __init__(self,
                  gumbel_params: GumbelParameters,  # 单独参数

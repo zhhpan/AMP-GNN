@@ -25,8 +25,6 @@ class WeightedGINConv(MessagePassing):
                             out_channels=out_channels,
                             bias = bias)
 
-        # 可学习的epsilon参数（中心节点权重）
-        self.initial_eps = eps
         self.eps = Parameter(torch.Tensor([eps]))
 
     def forward(
