@@ -34,7 +34,7 @@ class DataSet:
             Data: 加载并处理后的torch_geometric.data.Data对象。
         """
         # 创建HeterophilousGraphDataset对象
-        dataset = HeterophilousGraphDataset(root=self.root, name=self.name)
+        dataset = HeterophilousGraphDataset(root=self.root, name=self.name, transform=T.ToUndirected())
         return dataset[0]  # 返回第一个Data对象
 
 

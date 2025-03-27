@@ -3,7 +3,7 @@ import os
 import os.path as osp
 from argparse import Namespace
 from typing import Any, Dict, Tuple
-
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import Tensor
@@ -12,7 +12,8 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torchmetrics import Accuracy
 from tqdm import tqdm
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from dataset import DataSet as DS
 from model import AMPGNN
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
@@ -218,20 +219,14 @@ class Experiment:
         return avg_loss, accuracy
 
     def run(self) -> Dict[str, Any]:
-        """执行10折交叉验证流程"""
+        """执行10折交叉验证流程（集成动态损失图）"""
         fold_results = []
         total_steps = len(self.folds) * self.epochs
 
-        # 创建主进度条（总步数=折叠数×epoch数）
-        with tqdm(
-                total=total_steps,
-                desc="🌐 初始化训练进度...",  # 初始描述
-                bar_format="{desc}  [已用:{elapsed} 剩余:{remaining}]",
-                mininterval=0.5  # 降低刷新频率
-        ) as pbar:
-            print("")
+        # 创建主进度条
+        with tqdm(total=total_steps, desc="🌐 初始化训练进度...") as pbar:
             for fold in range(len(self.folds)):
-                # 初始化当前折叠
+                # 初始化折叠相关变量
                 data_fold = self.dataset.select_fold_and_split(fold)
                 self.data = data_fold
                 loaders = self.create_data_loaders()
@@ -241,14 +236,45 @@ class Experiment:
                 model = AMPGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
                 optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
 
-
+                # 初始化本折叠的损失记录
+                train_losses = []
+                val_losses = []
                 best_acc = 0
+
+                # 创建动态图表
+                fig = make_subplots(rows=1, cols=1)
+                fig.add_trace(go.Scatter(
+                    x=[],
+                    y=[],
+                    mode='lines',
+                    name='Train Loss',
+                    line=dict(color='blue')
+                ), row=1, col=1)
+                fig.add_trace(go.Scatter(
+                    x=[],
+                    y=[],
+                    mode='lines',
+                    name='Val Loss',
+                    line=dict(color='red')
+                ), row=1, col=1)
+                fig.update_layout(
+                    title=f'Fold {fold + 1} Training Progress',
+                    xaxis_title='Epoch',
+                    yaxis_title='Loss',
+                    showlegend=True,
+                    template='plotly_white'
+                )
+
+                # 初始化HTML文件路径
+                html_path = f'result/training_fold_{fold+1}.html'
+                fig.write_html(html_path, auto_open=False)
+
                 for epoch in range(self.epochs):
                     # 训练步骤
                     model.train()
                     optimizer.zero_grad()
-                    loss = self.calculate_loss(model, self.data, 'train')
-                    loss.backward()
+                    train_loss = self.calculate_loss(model, self.data, 'train')
+                    train_loss.backward()
                     optimizer.step()
 
                     # 验证步骤
@@ -256,35 +282,87 @@ class Experiment:
                     with torch.no_grad():
                         val_loss, val_acc = self.evaluate(model, loaders['val'], 'val')
                     self.accuracy.reset()
+
+                    # 记录损失
+                    train_losses.append(train_loss.item())
+                    val_losses.append(val_loss)
+
+                    # 动态更新图表（每50个epoch更新一次）
+                    if epoch % 50 == 0 or epoch == self.epochs - 1:
+                        # 更新图表数据
+                        fig.update_traces(
+                            x=np.arange(len(train_losses)),
+                            y=train_losses,
+                            selector={'name': 'Train Loss'}
+                        )
+                        fig.update_traces(
+                            x=np.arange(len(val_losses)),
+                            y=val_losses,
+                            selector={'name': 'Val Loss'}
+                        )
+
+                        # 自动调整坐标轴范围
+                        fig.update_xaxes(range=[0, self.epochs])
+                        y_max = max(max(train_losses), max(val_losses)) * 1.1
+                        fig.update_yaxes(range=[0, y_max])
+
+                        # 保存更新后的图表
+                        fig.write_html(html_path, auto_open=False)
+
                     # 更新最佳模型
                     if val_acc > best_acc:
                         best_acc = val_acc
                         torch.save(model.state_dict(), f'fold/{self.dataset.name}_fold{fold}.pth')
 
-                    # 动态更新进度条描述
-                    desc = (
-                        f"\033[32m🌐 折叠Fold {fold + 1}/{len(self.folds)}\033[0m | "
-                        f"\033[34m轮次Epoch {epoch + 1}/{self.epochs}\033[0m | "
-                        f"训练损失Train Loss: \033[31m{loss.item():.4f}\033[0m | "
-                        f"验证损失Val Loss: \033[31m{val_loss:.4f}\033[0m | "
-                        f"最佳验证Val Acc: \033[33m{best_acc:.2%}\033[0m"
-                    )
+                    # 更新进度条
+                    desc = (f"\033[32m🌐 Fold {fold + 1}/{len(self.folds)} | "
+                            f"\033[34mEpoch {epoch + 1}/{self.epochs} | "
+                            f"Train: {train_loss.item():.4f} | "
+                            f"Val: {val_loss:.4f} | "
+                            f"Best Val Acc: {best_acc:.2%}")
                     pbar.set_description(desc)
                     pbar.update(1)
 
-                # 折叠训练完成，执行测试
+                # 折叠结束后显示最终结果
                 model.load_state_dict(torch.load(f'fold/{self.dataset.name}_fold{fold}.pth'))
                 test_loss, test_acc = self.evaluate(model, loaders['test'], 'test')
-                self.accuracy.reset()
                 fold_results.append(test_acc)
 
-                # 更新最终结果展示
-                pbar.write(
-                    f"\n✅ Fold {fold + 1} Completed | "
-                    f"Test Accuracy: {test_acc:.2%} | "
-                    f"Test Loss: {test_loss:.4f} | "
-                    f"Current Mean: {np.mean(fold_results):.2%}"
+                # 添加最终标注
+                fig.add_annotation(
+                    xref="paper", yref="paper",
+                    x=0.95, y=0.95,
+                    text=f"Final Test Acc: {test_acc:.2%}",
+                    showarrow=False,
+                    font=dict(size=12)
                 )
+                fig.write_html(html_path, auto_open=False)
+                print(f"\n✅ Fold {fold+1} 训练完成，图表已保存至 {html_path}")
+
+        # 生成最终统计图表
+        final_fig = go.Figure()
+        final_fig.add_trace(go.Bar(
+            x=[f'Fold {i+1}' for i in range(len(fold_results))],
+            y=fold_results,
+            marker_color='rgb(55, 83, 109)'
+        ))
+        final_fig.update_layout(
+            title='10-Fold Cross Validation Results',
+            xaxis_title='Fold',
+            yaxis_title='Accuracy',
+            yaxis_tickformat=".2%",
+            annotations=[
+                dict(
+                    x=0.5,
+                    y=-0.15,
+                    showarrow=False,
+                    text=f"Mean Accuracy: {np.mean(fold_results):.2%} ± {np.std(fold_results):.2%}",
+                    xref="paper",
+                    yref="paper"
+                )
+            ]
+        )
+        final_fig.write_html('result/final_results.html', auto_open=True)
 
         # 统计结果
         test_accs = torch.tensor(fold_results)
@@ -308,11 +386,11 @@ if __name__ == "__main__":
         act_dim=16,
         dropout=0.2,
         lr=0.001,
-        epochs=3000,
+        epochs=10000,
         learn_temp=True,
         tau0 = 0.5,
         temp = 0.01,
-        env_num_layers = 3,
+        env_num_layers = 6,
         act_num_layers = 1 ,
         env_model_type = 'MEAN_GNN',
         act_model_type = 'MEAN_GNN',

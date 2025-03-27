@@ -92,7 +92,7 @@ class AMPGNN(nn.Module):
             out = self.env_net.component[idx](x=x, edge_index=edge_index, edge_weight=edge_weight)
             out = self.dropout(out)
             out = self.act_func(out)
-            x = out
+            x = out + x
         x = self.norm(x)
         x = self.env_net.decoder(x)
         result = result + x
