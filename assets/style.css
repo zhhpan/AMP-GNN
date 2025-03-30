@@ -1,0 +1,172 @@
+/* assets/style.css */
+/* 基础样式重置 */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* 颜色变量 */
+:root {
+  --primary-color: #2c3e50;    /* 主蓝 */
+  --secondary-color: #3498db;   /* 辅助蓝 */
+  --accent-color: #e74c3c;     /* 强调红 */
+  --success-color: #2ecc71;     /* 成功绿 */
+  --text-color: #34495e;        /* 正文文本 */
+  --background-color: #f5f7fa;  /* 页面背景 */
+  --card-shadow: 0 4px 6px rgba(0, 0, 0, 0.05); /* 卡片阴影 */
+}
+
+/* 通用容器样式 */
+.header {
+  background: white;
+  padding: 2rem 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: var(--card-shadow);
+  border-radius: 0 0 12px 12px;
+}
+
+.header-title {
+  color: var(--primary-color);
+  font-size: 2.25rem;
+  margin-bottom: 0.75rem;
+  font-family: 'Segoe UI', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+
+.header-description {
+  color: #7f8c8d;
+  font-size: 1.05rem;
+  line-height: 1.6;
+  max-width: 800px;
+}
+
+/* 主内容区布局 */
+.main-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* 卡片通用样式 */
+.graph-card {
+  background: white;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin: 1rem 0;
+  box-shadow: var(--card-shadow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.graph-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 控制面板区域 */
+.control-section {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 2rem;
+  align-items: start;
+  margin-bottom: 2rem;
+}
+
+.dropdown-container {
+  position: relative;
+  padding: 1rem;
+  background: rgba(236, 240, 241, 0.3);
+  border-radius: 8px;
+}
+
+.dropdown-label {
+  display: block;
+  margin-bottom: 0.75rem;
+  color: var(--text-color);
+  font-weight: 500;
+  font-size: 0.95rem;
+}
+
+/* 状态指示器 */
+.status-card {
+  background: var(--secondary-color);
+  color: white;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(52, 152, 219, 0.15);
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+/* 网格布局系统 */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+  gap: 2rem;
+  margin: 1.5rem 0;
+}
+
+/* 交叉验证结果区 */
+.results-section {
+  margin-top: 3rem;
+  padding: 2rem 0;
+  background: linear-gradient(to bottom, #f9fbfd, #ffffff);
+}
+
+.section-title {
+  color: var(--primary-color);
+  font-size: 1.5rem;
+  padding-left: 2rem;
+  margin-bottom: 1.5rem;
+  position: relative;
+}
+
+.section-title::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 24px;
+  width: 4px;
+  background: var(--secondary-color);
+  border-radius: 2px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .control-section {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-container {
+    grid-template-columns: 1fr;
+  }
+
+  .header-title {
+    font-size: 1.8rem;
+  }
+
+  .results-section {
+    margin-top: 2rem;
+    padding: 1.5rem 0;
+  }
+}
+
+@media (max-width: 768px) {
+  .main-container {
+    padding: 0 1rem;
+  }
+
+  .graph-card {
+    padding: 1rem;
+    margin: 0.75rem 0;
+  }
+
+  .section-title {
+    padding-left: 1rem;
+    font-size: 1.3rem;
+  }
+}

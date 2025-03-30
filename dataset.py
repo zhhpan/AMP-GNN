@@ -6,6 +6,7 @@ import torch_geometric.transforms as T
 from torch import nn
 from torch_geometric.data import Data
 from torch_geometric.datasets import HeterophilousGraphDataset
+from torch_geometric.nn import Node2Vec
 
 
 class DataSet:
@@ -25,6 +26,7 @@ class DataSet:
 
         # 加载数据
         self.data = self.load_data()
+        # self.generate_node2vec_embedding(self.num_features)
 
     def load_data(self) -> Data:
         """
@@ -102,3 +104,44 @@ class DataSet:
     def env_activation_type(self) -> type:
         """GIN的激活函数类型"""
         return nn.ReLU
+
+    def generate_node2vec_embedding(self, embedding_dim, walk_length=30, context_size=10):
+        """
+        生成Node2Vec嵌入并与原始特征拼接
+        """
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+        # 初始化Node2Vec模型
+        self.node2vec_model = Node2Vec(
+            edge_index=self.data.edge_index,
+            embedding_dim=embedding_dim,
+            walk_length=walk_length,
+            context_size=context_size,
+            sparse=True
+        ).to(device)
+
+        # 训练嵌入模型
+        loader = self.node2vec_model.loader(batch_size=128, shuffle=True)
+        optimizer = torch.optim.SparseAdam(self.node2vec_model.parameters(), lr=0.01)
+
+        self.node2vec_model.train()
+        for epoch in range(100):
+            for pos_rw, neg_rw in loader:
+                optimizer.zero_grad()
+                loss = self.node2vec_model.loss(pos_rw.to(device), neg_rw.to(device))
+                loss.backward()
+                optimizer.step()
+
+        # 合并原始特征与嵌入
+        self.data.x = self._combine_features(embedding_dim)
+
+    def _combine_features(self, embedding_dim):
+        """将原始特征与Node2Vec嵌入拼接"""
+        node_ids = torch.arange(self.data.num_nodes, dtype=torch.long)
+        embeddings = self.node2vec_model(node_ids.to(self.node2vec_model.embedding.weight.device)).detach()
+
+        # 标准化处理
+        embeddings = (embeddings - embeddings.mean(dim=0)) / embeddings.std(dim=0)
+        original_features = self.data.x.to(embeddings.device)
+
+        return torch.cat([original_features, embeddings], dim=1)

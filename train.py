@@ -2,10 +2,8 @@ import logging
 import os
 import os.path as osp
 from argparse import Namespace
-from typing import Any, Dict, Tuple, List
-import threading
+from typing import Any, Dict, Tuple
 import time
-
 import numpy as np
 import torch
 from torch import Tensor
@@ -14,15 +12,6 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torchmetrics import Accuracy
 from tqdm import tqdm
-
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
-import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
-
-# 假设这些模块已正确实现
 from dataset import DataSet as DS
 from model import AMPGNN
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
@@ -239,205 +228,6 @@ class Experiment:
         }
         return global_final_results
 
-# Dash应用
-app = dash.Dash(__name__)
-app.layout = html.Div([
-    html.H1("GNN 训练实时监控"),
-    html.Div(id='training-status', children="等待训练数据更新..."),
-    dcc.Dropdown(
-        id='fold-selector',
-        options=[{'label': f'Fold {i+1}', 'value': i} for i in range(10)],
-        value=0,
-        clearable=False
-    ),
-    dcc.Graph(id='progress-graph'),
-    html.Hr(),
-    html.H2("10折交叉验证结果"),
-    dcc.Graph(id='final-results-graph'),
-    dcc.Interval(id='interval-component', interval=3000, n_intervals=0),
-    html.Hr(),
-    html.H2("层概率监控"),
-    dcc.Graph(id='layer-probs-graph'),
-    dcc.Interval(id='interval-component', interval=3000, n_intervals=0),
-    html.Hr(),
-    html.H2("分层相似度动态"),
-    dcc.Graph(id='similarity-graph'),
-])
-
-@app.callback(
-    Output('progress-graph', 'figure'),
-    Output('training-status', 'children'),
-    Input('fold-selector', 'value'),
-    Input('interval-component', 'n_intervals')
-)
-def update_progress(selected_fold, n_intervals):
-    if selected_fold in global_training_progress and global_training_progress[selected_fold]["epoch"]:
-        fold_data = global_training_progress[selected_fold]
-        fig = make_subplots(rows=1, cols=1)
-        fig.add_trace(go.Scatter(
-            x=fold_data["epoch"],
-            y=fold_data["train_loss"],
-            mode='lines',
-            name='Train Loss',
-            line=dict(color='blue')
-        ))
-        fig.add_trace(go.Scatter(
-            x=fold_data["epoch"],
-            y=fold_data["val_loss"],
-            mode='lines',
-            name='Val Loss',
-            line=dict(color='red')
-        ))
-        fig.update_layout(
-            title=f'Fold {selected_fold + 1} 训练进度',
-            xaxis_title='Epoch',
-            yaxis_title='Loss',
-            template='plotly_white'
-        )
-        status = f"Fold {selected_fold+1} 当前 Epoch: {fold_data['epoch'][-1]+1}"
-        return fig, status
-    return go.Figure(), "等待训练数据更新..."
-
-@app.callback(
-    Output('final-results-graph', 'figure'),
-    Input('interval-component', 'n_intervals')
-)
-def update_final_results(n_intervals):
-    if global_final_results:
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=[f'Fold {i+1}' for i in range(len(global_final_results["folds"]))],
-            y=global_final_results["folds"],
-            marker_color='rgb(55, 83, 109)',
-            text=[f"{acc:.2%}" for acc in global_final_results["folds"]],
-            textposition='outside',
-        ))
-        annotation_text = (f"Mean Accuracy: {global_final_results['mean']:.2%} ± {global_final_results['std']:.2%}")
-        fig.update_layout(
-            title='10-Fold Cross Validation Results',
-            xaxis_title='Fold',
-            yaxis_title='Accuracy',
-            yaxis_tickformat=".2%",
-            annotations=[dict(
-                x=0.5,
-                y=-0.12,
-                showarrow=False,
-                text=annotation_text,
-                xref="paper",
-                yref="paper"
-            )]
-        )
-        return fig
-    return go.Figure()
-
-
-@app.callback(
-    Output('layer-probs-graph', 'figure'),
-    Input('fold-selector', 'value'),
-    Input('interval-component', 'n_intervals')
-)
-def update_layer_probs(selected_fold, n_intervals):
-    if selected_fold in global_training_progress and global_training_progress[selected_fold]["layer_probs"]:
-        probs_data = global_training_progress[selected_fold]["layer_probs"]
-        num_layers = len(probs_data[0]['in_probs'])
-
-        fig = make_subplots(
-            rows=num_layers,
-            cols=1,
-            subplot_titles=[f"Layer {i + 1} Probability Dynamics" for i in range(num_layers)]
-        )
-
-        for layer in range(num_layers):
-            # 合并输入输出概率曲线
-            fig.add_trace(go.Scatter(
-                x=list(range(len(probs_data))),
-                y=[epoch['in_probs'][layer] for epoch in probs_data],
-                name=f"Layer {layer + 1} In",
-                line=dict(color='#636EFA'),
-                mode='lines+markers',
-                marker=dict(size=4)
-            ), row=layer + 1, col=1)
-
-            fig.add_trace(go.Scatter(
-                x=list(range(len(probs_data))),
-                y=[epoch['out_probs'][layer] for epoch in probs_data],
-                name=f"Layer {layer + 1} Out",
-                line=dict(color='#EF553B'),
-                mode='lines+markers',
-                marker=dict(size=4)
-            ), row=layer + 1, col=1)
-
-        # 优化可视化布局
-        fig.update_layout(
-            height=200 * num_layers,
-            title_text="<b>Layer-wise Probability Dynamics</b>",
-            template="plotly_white",
-            hovermode="x unified",
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-
-        # 添加Y轴统一范围
-        for i in range(num_layers):
-            fig.update_yaxes(range=[0, 1], row=i + 1, col=1)
-
-        return fig
-    return go.Figure()
-
-
-@app.callback(
-    Output('similarity-graph', 'figure'),
-    [Input('fold-selector', 'value'),
-     Input('interval-component', 'n_intervals')]
-)
-def update_similarity_graph(selected_fold, n):
-    fig = go.Figure()
-
-    # 异常数据检测
-    current_data = global_training_progress.get(selected_fold, {}).get("similarity", [])
-    if not current_data:
-        fig.add_annotation(text="等待数据初始化...", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)
-        return fig
-
-    # 动态获取层数
-    num_layers = len(current_data[0]) if current_data else 0
-    valid_epochs = [epoch for epoch, data in enumerate(current_data) if any(not np.isnan(v) for v in data)]
-
-    # 为每层创建轨迹
-    colors = ['#e41a1c', '#377eb8', '#4daf4a'][:num_layers]  # 红蓝绿三色
-    for layer in range(num_layers):
-        y_values = [current_data[epoch][layer] if epoch < len(current_data) else np.nan
-                    for epoch in valid_epochs]
-
-        fig.add_trace(go.Scatter(
-            x=valid_epochs,
-            y=y_values,
-            mode='lines+markers',
-            name=f'Layer {layer + 1}',
-            line=dict(color=colors[layer], width=2),
-            marker=dict(size=6, opacity=0.8),
-            hovertemplate='Epoch: %{x}<br>Value: %{y:.4f}<extra></extra>'
-        ))
-
-    # 自适应坐标轴
-    fig.update_layout(
-        title="节点特征差异动态（您的原始计算）",
-        xaxis_title="训练轮次",
-        yaxis_title="平均平方差异",
-        template="plotly_white",
-        hovermode="x unified",
-        height=400,
-        yaxis=dict(
-            rangemode='tozero',  # 强制y轴包含零点
-            tickformat=".2e"  # 科学计数法显示
-        )
-    )
-    return fig
 
 def run_experiment_in_thread():
     args = Namespace(
@@ -468,6 +258,5 @@ def run_experiment_in_thread():
     print(f"最差折叠: {final_results['min']:.2%}")
 
 if __name__ == "__main__":
-    training_thread = threading.Thread(target=run_experiment_in_thread, daemon=True)
-    training_thread.start()
-    app.run_server(debug=True, use_reloader=False)
+    # 单独运行时启动训练
+    run_experiment_in_thread()

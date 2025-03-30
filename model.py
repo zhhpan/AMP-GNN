@@ -1,6 +1,7 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, Tensor
 from torch.nn import Dropout, ReLU
 
 from layers.temp import TempSoftPlus
@@ -68,6 +69,11 @@ class AMPGNN(nn.Module):
             device=device,
             temp=gumbel_params.temp,
         )
+        self.layer_probs = {
+            'in_prob': [[] for _ in range(self.num_layers)],
+            'out_prob': [[] for _ in range(self.num_layers)]
+        }
+        self.similarity_stats = [[] for _ in range(env_params.num_layers)]
 
     def forward(self,
                 x: torch.Tensor,
@@ -85,6 +91,9 @@ class AMPGNN(nn.Module):
             temp = self.temp_model(x=x, edge_index=edge_index)
             in_prob = F.gumbel_softmax(in_logits, hard=True, tau=temp)
             out_prob = F.gumbel_softmax(out_logits, hard=True, tau=temp)
+            with torch.no_grad():
+                self.layer_probs['in_prob'][idx].append(in_prob[:, 0].mean().item())
+                self.layer_probs['out_prob'][idx].append(out_prob[:, 0].mean().item())
             in_edge = in_prob[:,0]
             out_edge = out_prob[:,0]
             u, v = edge_index
@@ -93,12 +102,35 @@ class AMPGNN(nn.Module):
             out = self.dropout(out)
             out = self.act_func(out)
             x = out + x
+            self._calc_layer_similarity(x,edge_index,idx)
         x = self.norm(x)
         x = self.env_net.decoder(x)
         result = result + x
         return result
 
+    def _init_probs_storage(self):
+        """初始化概率存储结构"""
+        self.layer_probs = {
+            'in_prob': [[] for _ in range(self.num_layers)],
+            'out_prob': [[] for _ in range(self.num_layers)]
+        }
 
+    def get_probs(self):
+        """获取当前概率并清空存储（返回标量列表）"""
+        probs = {
+            'in_prob': [np.mean(layer) if layer else 0 for layer in self.layer_probs['in_prob']],
+            'out_prob': [np.mean(layer) if layer else 0 for layer in self.layer_probs['out_prob']]
+        }
+        # 清空存储
+        self._init_probs_storage()
+        return probs
 
-
-
+    def _calc_layer_similarity(self, features: Tensor, edge_index, layer_idx: int):
+        """计算余弦相似度（保持向量化计算）"""
+        src, dst = edge_index
+        # 向量化计算特征差异
+        diff = features[src] - features[dst]
+        squared_diff = diff.pow(2).sum(dim=1)
+        num_edges = edge_index.shape[1]
+        num_features = features.shape[1]
+        self.similarity_stats[layer_idx].append((squared_diff.sum() / (num_features * num_edges)).item())
