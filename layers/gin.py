@@ -47,7 +47,15 @@ class WeightedGINConv(MessagePassing):
         # 通过MLP变换
         return self.mlp(out)
 
-    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
-        # 加权消息：x_j * edge_weight
-        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+    def message(self, x_j: Tensor, edge_attr: OptTensor, edge_weight: OptTensor = None) -> Tensor:
+        if edge_attr is None:
+            if edge_weight is None:
+                return x_j
+            else:
+                return edge_weight.view(-1, 1) * x_j
+        else:
+            if edge_weight is None:
+                return x_j + edge_attr
+            else:
+                return edge_weight.view(-1, 1) * (x_j + edge_attr)
 

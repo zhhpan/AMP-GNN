@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn import Dropout, ReLU
+from torch_geometric.typing import OptTensor
 
 from layers.temp import TempSoftPlus
 from network.action import ActionNetwork
@@ -16,7 +17,10 @@ class AMPGNN(nn.Module):
                  gumbel_params: GumbelParameters,  # 单独参数
                  env_params: EnvironmentParameters,
                  action_params: ActionParameters,
-                 device: torch.device):
+                 device: torch.device,
+                 use_model: bool,
+                 env_edge_embedding = None,
+                 act_edge_embedding = None):
         super().__init__()
 
         # 初始化子网络
@@ -28,69 +32,87 @@ class AMPGNN(nn.Module):
             dropout=env_params.dropout,
             mlp_func=gumbel_params.gin_mlp_func,
             model_type = env_params.model_type,
-            device = device
+            device = device,
+            is_lrgb = env_params.is_lrgb,
         )
+        self.use_model = use_model
+        if self.use_model:
+            self.in_action_net = ActionNetwork(
+                in_dim=env_params.env_dim,
+                hidden_dim=action_params.hidden_dim,
+                model_type=action_params.model_type,
+                num_layers=action_params.num_layers,
+                dropout=action_params.dropout,
+                mlp_func=gumbel_params.gin_mlp_func,
+                device=device
+            )
 
-        self.in_action_net = ActionNetwork(
-            in_dim=env_params.env_dim,
-            hidden_dim=action_params.hidden_dim,
-            model_type=action_params.model_type,
-            num_layers=action_params.num_layers,
-            dropout=action_params.dropout,
-            mlp_func=gumbel_params.gin_mlp_func,
-            device=device
-        )
-
-        self.out_action_net = ActionNetwork(
-            in_dim=env_params.env_dim,
-            hidden_dim=action_params.hidden_dim,
-            model_type=action_params.model_type,
-            num_layers=action_params.num_layers,
-            dropout=action_params.dropout,
-            mlp_func=gumbel_params.gin_mlp_func,
-            device=device
-        )
-
-        # Gumbel参数
-        self.learn_temp = gumbel_params.learn_temp
-        self.tau = nn.Parameter(torch.tensor(gumbel_params.tau0),
-                                requires_grad=self.learn_temp)
+            self.out_action_net = ActionNetwork(
+                in_dim=env_params.env_dim,
+                hidden_dim=action_params.hidden_dim,
+                model_type=action_params.model_type,
+                num_layers=action_params.num_layers,
+                dropout=action_params.dropout,
+                mlp_func=gumbel_params.gin_mlp_func,
+                device=device
+            )
+            self.temp_model = TempSoftPlus(
+                learn_temp=gumbel_params.learn_temp,
+                tau0=gumbel_params.tau0,
+                env_dim=env_params.env_dim,
+                gin_mlp_func=gumbel_params.gin_mlp_func,
+                temp_model_type=gumbel_params.model_type,
+                device=device,
+                temp=gumbel_params.temp,
+            )
+            # Gumbel参数
+            self.learn_temp = gumbel_params.learn_temp
+            self.tau = nn.Parameter(torch.tensor(gumbel_params.tau0),
+                                    requires_grad=self.learn_temp)
         self.device = device
         self.num_layers = env_params.num_layers
         self.dropout = Dropout(env_params.dropout)
         self.act_func = ReLU()
         self.norm = nn.LayerNorm(env_params.env_dim)
-        self.temp_model = TempSoftPlus(
-            learn_temp=gumbel_params.learn_temp,
-            tau0=gumbel_params.tau0,
-            env_dim=env_params.env_dim,
-            gin_mlp_func=gumbel_params.gin_mlp_func,
-            temp_model_type=gumbel_params.model_type,
-            device=device,
-            temp=gumbel_params.temp,
-        )
         self.layer_probs = {
             'in_prob': [[] for _ in range(self.num_layers)],
             'out_prob': [[] for _ in range(self.num_layers)]
         }
         self.similarity_stats = [[] for _ in range(env_params.num_layers)]
-
+        self.env_bond_encoder = env_edge_embedding
+        self.act_bond_encoder = act_edge_embedding
     def forward(self,
                 x: torch.Tensor,
-                edge_index: torch.Tensor) -> torch.Tensor:
+                edge_index: torch.Tensor,
+                pestat,
+                edge_attr: OptTensor = None) -> torch.Tensor:
         result = 0
-        x = self.env_net.encoder(x)
+        if edge_attr is None or self.env_bond_encoder is None:
+            env_edge_embedding = None
+        else:
+            env_edge_embedding = self.env_bond_encoder(edge_attr)
+        if edge_attr is None or self.act_bond_encoder is None:
+            act_edge_embedding = None
+        else:
+            act_edge_embedding = self.act_bond_encoder(edge_attr)
+        x = self.env_net.encoder(x,pestat)
         x = self.dropout(x)
         x = self.act_func(x)
 
 
         for idx, layer in enumerate(self.env_net.component):
             x = self.norm(x)
-            in_logits = self.in_action_net(x, edge_index=edge_index)
-            out_logits = self.out_action_net(x, edge_index=edge_index)
-            temp = self.temp_model(x=x, edge_index=edge_index)
-            in_prob = F.gumbel_softmax(in_logits, hard=True, tau=temp)
-            out_prob = F.gumbel_softmax(out_logits, hard=True, tau=temp)
+            if self.use_model:
+                in_logits = self.in_action_net(x, edge_index=edge_index, env_edge_attr=env_edge_embedding,
+                                        act_edge_attr=act_edge_embedding)
+                out_logits = self.out_action_net(x, edge_index=edge_index, env_edge_attr=env_edge_embedding,
+                                        act_edge_attr=act_edge_embedding)
+                temp = self.temp_model(x=x, edge_index=edge_index, edge_attr=env_edge_embedding)
+                in_prob = F.gumbel_softmax(in_logits, hard=True, tau=temp)
+                out_prob = F.gumbel_softmax(out_logits, hard=True, tau=temp)
+            else:
+                in_prob = torch.ones((x.shape[0], 2)).to(self.device)
+                out_prob = torch.ones((x.shape[0], 2)).to(self.device)
             with torch.no_grad():
                 self.layer_probs['in_prob'][idx].append(in_prob[:, 0].mean().item())
                 self.layer_probs['out_prob'][idx].append(out_prob[:, 0].mean().item())
@@ -98,7 +120,7 @@ class AMPGNN(nn.Module):
             out_edge = out_prob[:,0]
             u, v = edge_index
             edge_weight = in_edge[u] * out_edge[v]
-            out = self.env_net.component[idx](x=x, edge_index=edge_index, edge_weight=edge_weight)
+            out = self.env_net.component[idx](x=x, edge_index=edge_index, edge_weight=edge_weight, edge_attr=env_edge_embedding)
             out = self.dropout(out)
             out = self.act_func(out)
             x = out + x

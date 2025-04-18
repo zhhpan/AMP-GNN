@@ -22,6 +22,7 @@ class EnvironmentParameters:
     dropout: float
     activation: Callable[[], Any]
     model_type: str
+    is_lrgb: bool
 
 
 @dataclass

@@ -170,3 +170,33 @@
     font-size: 1.3rem;
   }
 }
+.save-button {
+    background-color: #2A5C8A;
+    color: white !important;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 14px;
+    margin-left: 20px;
+}
+
+.save-button:hover {
+    background-color: #1E4466;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.save-button:disabled {
+    background-color: #CCD6E0;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}

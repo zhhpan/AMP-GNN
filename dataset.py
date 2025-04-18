@@ -1,12 +1,17 @@
 import copy
 from typing import Callable, Optional
 
+import numpy as np
 import torch
 import torch_geometric.transforms as T
 from torch import nn
+from torch.utils.data import Subset
 from torch_geometric.data import Data
-from torch_geometric.datasets import HeterophilousGraphDataset
+from torch_geometric.datasets import HeterophilousGraphDataset, Planetoid
 from torch_geometric.nn import Node2Vec
+
+from lrgb.lrgb import PeptidesFunctionalDataset
+from lrgb.transforms import apply_transform
 
 
 class DataSet:
@@ -35,9 +40,21 @@ class DataSet:
         Returns:
             Data: 加载并处理后的torch_geometric.data.Data对象。
         """
-        # 创建HeterophilousGraphDataset对象
-        dataset = HeterophilousGraphDataset(root=self.root, name=self.name, transform=T.ToUndirected())
-        return dataset[0]  # 返回第一个Data对象
+        if self.name in ['roman_empire', 'amazon_ratings', 'minesweeper',
+                    'tolokers', 'questions']:
+            # 创建HeterophilousGraphDataset对象
+            dataset = HeterophilousGraphDataset(root=self.root, name=self.name, transform=T.ToUndirected())
+            return dataset[0]  # 返回第一个Data对象
+        elif self.name in['cora', 'pubmed']:
+            dataset = Planetoid(root=self.root, name=self.name, transform=T.NormalizeFeatures())
+            return dataset[0]  # 返回第一个Data对象
+        elif self.name in ['func']:
+            dataset = PeptidesFunctionalDataset(root=self.root)
+            pos_enc = 16
+            dataset = apply_transform(dataset=dataset, pos_encoder=pos_enc)
+            return dataset[0]
+        else:
+            raise ValueError(f'DataSet {self.name} not supported in dataloader')
 
 
     def select_fold_and_split(self, fold: int):
@@ -52,13 +69,40 @@ class DataSet:
         Returns:
             dataset_copy: Data集合
         """
-        dataset_copy = copy.deepcopy(self.data)
-        dataset_copy.train_mask = self.data.train_mask[:, fold]
-        dataset_copy.val_mask = self.data.val_mask[:, fold]
-        dataset_copy.test_mask = self.data.test_mask[:, fold]
+        if self.name in ['roman_empire', 'amazon_ratings', 'minesweeper',
+                         'tolokers', 'questions']:
+            dataset_copy = copy.deepcopy(self.data)
+            dataset_copy.train_mask = self.data.train_mask[:, fold]
+            dataset_copy.val_mask = self.data.val_mask[:, fold]
+            dataset_copy.test_mask = self.data.test_mask[:, fold]
+            return dataset_copy
+        elif self.name in ['cora', 'pubmed']:
+            device = self.data.x.device
+            with np.load(f'folds/{self.name}_split_0.6_0.2_{fold}.npz') as folds_file:
+                train_mask = torch.tensor(folds_file['train_mask'], dtype=torch.bool, device=device)
+                val_mask = torch.tensor(folds_file['val_mask'], dtype=torch.bool, device=device)
+                test_mask = torch.tensor(folds_file['test_mask'], dtype=torch.bool, device=device)
 
-        return dataset_copy
+            setattr(self.data, 'train_mask', train_mask)
+            setattr(self.data, 'val_mask', val_mask)
+            setattr(self.data, 'test_mask', test_mask)
 
+            # self.data.train_mask[self.data.non_valid_samples] = False
+            # self.data.test_mask[self.data.non_valid_samples] = False
+            # self.data.val_mask[self.data.non_valid_samples] = False
+            return self.data
+        elif self.name in ['func']:
+            split_idx = self.data.get_idx_split()
+            train_indices = split_idx["train"]
+            val_indices = split_idx["val"]
+            test_indices = split_idx["test"]
+            train_mask = Subset(self.data, train_indices)
+            val_mask = Subset(self.data, val_indices)
+            test_mask = Subset(self.data, test_indices)
+            setattr(self.data, 'train_mask', train_mask)
+            setattr(self.data, 'val_mask', val_mask)
+            setattr(self.data, 'test_mask', test_mask)
+            return self.data
 
 
     def get_folds(self):
@@ -69,7 +113,10 @@ class DataSet:
         Returns:
             list: 包含每个折叠的索引列表，例如 [0, 1, 2, ..., 9]。
         """
-        return list(range(10))  # 返回0到9的折叠索引
+        if self.name in ['func']:
+            return list(range(1))
+        else:
+            return list(range(10))  # 返回0到9的折叠索引
 
 
     def get_out_dim(self) -> int:
@@ -79,7 +126,10 @@ class DataSet:
         Returns:
             int: 输出层维度。
         """
-        return int(max([self.data.y.max().item() ]) + 1)
+        if self.name in ['func']:
+            return self.data.y.shape[1]
+        else:
+            return int(max([self.data.y.max().item() ]) + 1)
 
     # 7. GIN网络的MLP构建函数
     def gin_mlp_func(self) -> Callable:
@@ -89,10 +139,15 @@ class DataSet:
         Returns:
             Callable: MLP构建函数，输入参数为(in_channels, out_channels, bias)。
         """
-        def mlp_func(in_channels: int, out_channels: int, bias: bool):
-            return torch.nn.Sequential(torch.nn.Linear(in_channels, 2 * in_channels, bias=bias),
-                                           torch.nn.BatchNorm1d(2 * in_channels),
-                                           torch.nn.ReLU(), torch.nn.Linear(2 * in_channels, out_channels, bias=bias))
+        if self.name == 'func':
+            def mlp_func(in_channels: int, out_channels: int, bias: bool):
+                return torch.nn.Sequential(torch.nn.Linear(in_channels, out_channels, bias=bias),
+                                           torch.nn.ReLU(), torch.nn.Linear(out_channels, out_channels, bias=bias))
+        else:
+            def mlp_func(in_channels: int, out_channels: int, bias: bool):
+                return torch.nn.Sequential(torch.nn.Linear(in_channels, 2 * in_channels, bias=bias),
+                                               torch.nn.BatchNorm1d(2 * in_channels),
+                                               torch.nn.ReLU(), torch.nn.Linear(2 * in_channels, out_channels, bias=bias))
         return mlp_func
 
     @property

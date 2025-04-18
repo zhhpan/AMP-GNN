@@ -24,8 +24,8 @@ class TempSoftPlus(Module):
         self.softplus = nn.Softplus(beta=1)
         self.tau0 = tau0
 
-    def forward(self, x: Tensor, edge_index: Adj):
-        x = self.linear_model[0](x=x, edge_index=edge_index)
+    def forward(self, x: Tensor, edge_index: Adj, edge_attr: Tensor):
+        x = self.linear_model[0](x=x, edge_index=edge_index, edge_attr=edge_attr)
         x = self.softplus(x) + self.tau0
         temp = x.pow_(-1)
         return temp.masked_fill_(temp == float('inf'), 0.)

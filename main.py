@@ -24,6 +24,7 @@ from dash.dependencies import Input, Output
 
 # 假设这些模块已正确实现
 from dataset import DataSet as DS
+from lrgb.encoders.mol_encoder import BondEncoder
 from model import AMPGNN
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
 
@@ -97,7 +98,8 @@ class Experiment:
             out_dim=self.dataset.get_out_dim(),
             dropout=self.dropout,
             activation=self.dataset.env_activation_type(),
-            model_type=self.env_model_type
+            model_type=self.env_model_type,
+            is_lrgb = True if self.dataset_name == 'func' else False
         )
         action_params = ActionParameters(
             num_layers=self.act_num_layers,
@@ -131,7 +133,7 @@ class Experiment:
 
     def calculate_loss(self, model: torch.nn.Module, data: Data, mask: str) -> Tensor:
         node_mask = getattr(data, f"{mask}_mask")
-        out = model(data.x.to(self.device), data.edge_index.to(self.device))
+        out = model(x=  data.x.to(self.device), data.edge_index.to(self.device))
         return self.task_loss(out[node_mask], data.y.to(self.device)[node_mask])
 
     def evaluate(self, model: torch.nn.Module, loader: DataLoader, mask: str) -> Tuple[float, float]:
@@ -161,7 +163,10 @@ class Experiment:
             loaders = self.create_data_loaders()
 
             gumbel_params, env_params, action_params = self.prepare_model_arguments()
-            model = AMPGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
+            if(self.dataset_name == 'func'):
+                env_edge_embedding = BondEncoder(env_params.env_dim)
+                act_edge_embedding = BondEncoder(action_params.hidden_dim)
+            model = AMPGNN(gumbel_params, env_params, action_params, self.device, self.use_model,env_edge_embedding,act_edge_embedding).to(self.device)
             optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
 
             train_losses = []

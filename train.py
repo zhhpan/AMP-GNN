@@ -7,12 +7,14 @@ import time
 import numpy as np
 import torch
 from torch import Tensor
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-from torchmetrics import Accuracy
+from torchmetrics import Accuracy, AUROC, AveragePrecision
 from tqdm import tqdm
 from dataset import DataSet as DS
+from lrgb.cosine_scheduler import cosine_with_warmup_scheduler
+from lrgb.encoders.mol_encoder import BondEncoder
 from model import AMPGNN
 from param import GumbelParameters, EnvironmentParameters, ActionParameters
 
@@ -51,7 +53,10 @@ class Experiment:
         self.load_dataset()
 
         # 损失函数
-        self.task_loss = CrossEntropyLoss()
+        if(self.dataset_name == 'func'):
+            self.task_loss = BCEWithLogitsLoss()
+        else:
+            self.task_loss = CrossEntropyLoss()
 
         # 折叠信息
         self.folds = self.dataset.get_folds()
@@ -59,11 +64,21 @@ class Experiment:
         self.logger.info(f"分类类别数: {self.num_classes}")
 
         # 评估指标
-        self.accuracy = Accuracy(
-            task="multiclass",
-            num_classes=self.num_classes
-        ).to(self.device)
-
+        if self.dataset_name in ['roman_empire', 'amazon_ratings']:
+            self.accuracy = Accuracy(
+                task="multiclass",
+                num_classes=self.num_classes
+            ).to(self.device)
+        elif self.dataset_name in ['minesweeper', 'tolokers', 'questions']:
+            self.accuracy = AUROC(
+                task="multiclass",
+                num_classes=self.num_classes
+            ).to(self.device)
+        elif self.dataset_name in ['func']:
+            self.accuracy = AveragePrecision(
+                task="multilabel",
+                num_labels=self.num_classes
+            ).to(self.device)
     def set_seed(self) -> None:
         torch.manual_seed(self.seed)
         if torch.cuda.is_available():
@@ -86,7 +101,8 @@ class Experiment:
             out_dim=self.dataset.get_out_dim(),
             dropout=self.dropout,
             activation=self.dataset.env_activation_type(),
-            model_type=self.env_model_type
+            model_type=self.env_model_type,
+            is_lrgb=True if self.dataset_name == 'func' else False
         )
         action_params = ActionParameters(
             num_layers=self.act_num_layers,
@@ -102,11 +118,12 @@ class Experiment:
         root = osp.join(ROOT_DIR, 'datasets')
         name = self.dataset_name
         self.dataset = DS(root=root, name=name)
-        self.dataset.data.y = self.dataset.data.y.to(torch.long)
+        if(self.dataset_name == 'func'):
+            self.dataset.data.y = self.dataset.data.y.to(dtype=torch.float)
 
     def create_data_loaders(self) -> Dict[str, DataLoader]:
         def apply_mask(data: Data, mask_type: str) -> Data:
-            masked_data = data.clone()
+            masked_data = data
             for node_type in ['train', 'val', 'test']:
                 if node_type != mask_type:
                     setattr(masked_data, f"{node_type}_mask", None)
@@ -120,7 +137,10 @@ class Experiment:
 
     def calculate_loss(self, model: torch.nn.Module, data: Data, mask: str) -> Tensor:
         node_mask = getattr(data, f"{mask}_mask")
-        out = model(data.x.to(self.device), data.edge_index.to(self.device))
+        edge_attr = data.edge_attr
+        if data.edge_attr is not None:
+            edge_attr = edge_attr.to(device=self.device)
+        out = model(x = data.x.to(self.device), edge_index = data.edge_index.to(self.device), edge_attr = edge_attr, pestat = [data.EigVals.to(self.device), data.EigVecs.to(self.device)])
         return self.task_loss(out[node_mask], data.y.to(self.device)[node_mask])
 
     def evaluate(self, model: torch.nn.Module, loader: DataLoader, mask: str) -> Tuple[float, float]:
@@ -130,8 +150,10 @@ class Experiment:
             for data in loader:
                 loss = self.calculate_loss(model, data, mask)
                 total_loss += loss.item()
-                pred = model(data.x.to(self.device), data.edge_index.to(self.device)).argmax(dim=1)
-                node_mask = getattr(data, f"{mask}_mask")
+                edge_attr = data.edge_attr
+                if data.edge_attr is not None:
+                    edge_attr = edge_attr.to(device=self.device)
+                pred = model(x = data.x.to(self.device), edge_index = data.edge_index.to(self.device), edge_attr = edge_attr, pestat = [data.EigVals.to(self.device), data.EigVecs.to(self.device)]).argmax(dim=1)
                 self.accuracy(pred, data.y.to(self.device))
         avg_loss = total_loss / len(loader)
         accuracy = self.accuracy.compute().item()
@@ -150,8 +172,17 @@ class Experiment:
             loaders = self.create_data_loaders()
 
             gumbel_params, env_params, action_params = self.prepare_model_arguments()
-            model = AMPGNN(gumbel_params, env_params, action_params, self.device).to(self.device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
+            if (self.dataset_name == 'func'):
+                env_edge_embedding = BondEncoder(env_params.env_dim)
+                act_edge_embedding = BondEncoder(action_params.hidden_dim)
+            model = AMPGNN(gumbel_params, env_params, action_params, self.device, self.use_model, env_edge_embedding,act_edge_embedding).to(self.device)
+            if (self.dataset_name == 'func'):
+                optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr, weight_decay=5e-4)
+                scheduler = cosine_with_warmup_scheduler(optimizer=optimizer,num_warmup_epochs=1000,max_epoch=self.epochs)
+            else:
+                optimizer = torch.optim.Adam(model.parameters(), lr=self.lr, weight_decay=5e-4)
+                scheduler = None
+
 
             train_losses = []
             val_losses = []
@@ -179,7 +210,8 @@ class Experiment:
                 model.similarity_stats = [[] for _ in range(len(model.similarity_stats))]  # 清空缓存
                 # 验证步骤
                 val_loss, val_acc = self.evaluate(model, loaders['val'], 'val')
-
+                if scheduler:
+                    scheduler.step(val_loss)
                 # 早停逻辑
                 if val_acc > best_acc + self.early_stop_delta:
                     best_acc = val_acc
@@ -219,22 +251,25 @@ class Experiment:
 
         # 结果统计
         test_accs = torch.tensor(fold_results)
-        global_final_results = {
+        final_results = {
             "folds": test_accs.tolist(),
             "mean": test_accs.mean().item(),
             "std": test_accs.std().item(),
             "max": test_accs.max().item(),
             "min": test_accs.min().item()
         }
-        return global_final_results
+        # global_final_results = final_results
+        # print('global_final_results:', global_final_results)
+        return final_results
 
 
 def run_experiment_in_thread():
+    global  global_final_results
     args = Namespace(
-        dataset_name='roman-empire',
+        dataset_name='func',
         seed=0,
-        batch_size=32,
-        env_dim=64,
+        batch_size=2,
+        env_dim=128,
         act_dim=16,
         dropout=0.2,
         lr=0.001,
@@ -242,16 +277,18 @@ def run_experiment_in_thread():
         learn_temp=True,
         tau0=0.5,
         temp=0.01,
-        env_num_layers=3,
+        env_num_layers=2,
         act_num_layers=1,
         env_model_type='MEAN_GNN',
         act_model_type='MEAN_GNN',
         gumbel_model_type='LIN',
-        early_stop_patience=3000,
-        early_stop_delta=0.001
+        early_stop_patience=200,
+        early_stop_delta=0.001,
+        use_model = True,
     )
     experiment = Experiment(args)
     final_results = experiment.run()
+    global_final_results = final_results
     print(f"10折交叉验证结果:")
     print(f"平均准确率: {final_results['mean']:.2%} ± {final_results['std']:.2%}")
     print(f"最佳折叠: {final_results['max']:.2%}")

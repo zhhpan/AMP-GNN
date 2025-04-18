@@ -3,6 +3,7 @@ from typing import Callable
 import torch
 from torch import nn
 from torch.nn import ReLU
+from torch_geometric.typing import OptTensor
 
 from layers.load_helper import get_component_list
 
@@ -18,11 +19,12 @@ class ActionNetwork(nn.Module):
         self.act_func = ReLU()
         self.num_layers = num_layers
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, env_edge_attr: OptTensor, act_edge_attr: OptTensor) -> torch.Tensor:
+        edge_attrs = [env_edge_attr] + (self.num_layers - 1) * [act_edge_attr]
         # 计算边特征
-        for idx, layer in enumerate(self.net[:-1]):
-            x = layer(x, edge_index=edge_index)
+        for idx, (edge_attr, layer) in enumerate(zip(edge_attrs[:-1], self.net[:-1])):
+            x = layer(x, edge_index=edge_index, edge_attr=edge_attr)
             x = self.dropout(x)
             x = self.act_func(x)
-        x = self.net[-1](x, edge_index=edge_index)
+        x = self.net[-1](x, edge_index=edge_index, edge_attr=edge_attrs[-1])
         return x

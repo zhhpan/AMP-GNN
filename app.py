@@ -1,3 +1,6 @@
+import json
+from datetime import datetime
+
 import numpy as np
 import dash
 from dash import dcc, html
@@ -6,7 +9,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import threading
 
-from train import global_training_progress, global_final_results, run_experiment_in_thread
+from train import global_training_progress,  run_experiment_in_thread
 
 # ============================
 # Dash应用配置
@@ -72,17 +75,12 @@ app.layout = html.Div([
         ], className="grid-container")
     ], className="main-container"),
 
-    html.Div([
-        html.H2("🔬 交叉验证综合结果", className="section-title"),
-        dcc.Graph(id='final-results-graph', className="full-width-graph")
-    ], className="results-section"),
-
     dcc.Interval(id='interval-component', interval=3000, n_intervals=0),
 ], style={'backgroundColor': '#f5f7fa'})
 
 
 # ============================
-# 回调函数（适配真实数据源）
+# 回调函数
 # ============================
 @app.callback(
     [Output('progress-graph', 'figure'),
@@ -143,60 +141,6 @@ def update_progress(selected_fold, n):
 
     return go.Figure(), "等待训练数据初始化..."
 
-
-@app.callback(
-    Output('final-results-graph', 'figure'),
-    [Input('interval-component', 'n_intervals')]
-)
-def update_final_results(n):
-    if global_final_results and global_final_results.get("folds"):
-        fig = go.Figure()
-
-        fig.add_trace(go.Bar(
-            x=[f'Fold {i + 1}' for i in range(10)],
-            y=global_final_results["folds"],
-            marker=dict(
-                color=COLOR_SCHEME['secondary'],
-                line=dict(color=COLOR_SCHEME['primary'], width=1)
-            ),
-            opacity=0.9,
-            text=[f"{acc:.2%}" for acc in global_final_results["folds"]],
-            textposition='outside'
-        ))
-
-        stats_text = (f"平均准确率: {global_final_results['mean']:.2%} ± "
-                      f"{global_final_results['std']:.2%}")
-
-        fig.update_layout(
-            **BASE_LAYOUT,
-            title={
-                'text': "📊 10折交叉验证结果分析",
-                'font': {'size': 22, 'color': COLOR_SCHEME['primary']}
-            },
-            xaxis=dict(
-                title="数据折",
-                gridcolor=COLOR_SCHEME['grid'],
-                showline=True
-            ),
-            yaxis=dict(
-                title="准确率",
-                tickformat=".2%",
-                range=[0.6, 1.0],
-                gridcolor=COLOR_SCHEME['grid'],
-                showline=True
-            ),
-            annotations=[
-                dict(
-                    x=0.5, y=-0.25,
-                    xref="paper", yref="paper",
-                    text=stats_text,
-                    showarrow=False,
-                    font=dict(size=13, color=COLOR_SCHEME['accent'])
-                )
-            ]
-        )
-        return fig
-    return go.Figure()
 
 
 @app.callback(
